@@ -74,7 +74,6 @@ mon_backtrace(int argc, char **argv, struct Trapframe *tf)
         arg2 = ptr[4];
         arg3 = ptr[5];
         arg4 = ptr[6];
-        cprintf ("test  ebp %08x  eip %08x  args %08x %08x %08x %08x %08x\n", ebp, eip, arg0, arg1, arg2, arg3,      arg4);
         cprintf ("Stack backtrace:\n");
         while (ebp != 0) {
 
