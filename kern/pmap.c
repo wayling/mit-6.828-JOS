@@ -5,37 +5,27 @@
 #include <inc/error.h>
 #include <inc/string.h>
 #include <inc/assert.h>
-
+#include <inc/queue.h>
 #include <kern/pmap.h>
 #include <kern/kclock.h>
-
 // These variables are set by i386_detect_memory()
 size_t npages;			// Amount of physical memory (in pages)
 static size_t npages_basemem;	// Amount of base memory (in pages)
+static char *g_nextfreemem;
 
-// These variables are set in mem_init()
 pde_t *kern_pgdir;		// Kernel's initial page directory
+pde_t *init_pgdir;
+physaddr_t boot_cr3;
 struct Page *pages;		// Physical page state array
 static struct Page *page_free_list;	// Free list of physical pages
 struct Segdesc gdt[] =
 {
-    // 0x0 - unused (always faults -- for trapping NULL far pointers)
-    SEG_NULL,
-
-    // 0x8 - kernel code segment
-    [GD_KT >> 3] = SEG(STA_X | STA_R, 0x0, 0xffffffff, 0),
-
-    // 0x10 - kernel data segment
-    [GD_KD >> 3] = SEG(STA_W, 0x0, 0xffffffff, 0),
-
-    // 0x18 - user code segment
-    [GD_UT >> 3] = SEG(STA_X | STA_R, 0x0, 0xffffffff, 3),
-
-    // 0x20 - user data segment
-    [GD_UD >> 3] = SEG(STA_W, 0x0, 0xffffffff, 3),
-
-    // 0x28 - tss, initialized in idt_init()
-    [GD_TSS >> 3] = SEG_NULL
+    SEG_NULL,//null
+    SEG(STA_X | STA_R, 0x0, 0xffffffff, 0),//kernel code
+    SEG(STA_W, 0x0, 0xffffffff, 0),//kernel data
+    SEG(STA_X | STA_R, 0x0, 0xffffffff, 3),//user code
+    SEG(STA_W, 0x0, 0xffffffff, 3),//user data
+    SEG_NULL//tss
 };
 struct Pseudodesc gdt_pd = {
     sizeof(gdt) - 1, (unsigned long) gdt
@@ -121,9 +111,10 @@ boot_alloc(uint32_t n)
 	// to a multiple of PGSIZE.
 	//
 	// LAB 2: Your code here.
-    v = ROUNDUP (boot_freemem, align);
-    boot_freemem = (char*) v + n;
-	return v;
+    v = ROUNDUP (nextfree,PGSIZE);
+    nextfree = (char*) v + n;
+	g_nextfreemem = nextfree;
+    return v;
     //return NULL;
 }
 
@@ -146,14 +137,15 @@ mem_init(void)
 	i386_detect_memory();
 
 	// Remove this line when you're ready to test this function.
-	panic("mem_init: This function is not finished\n");
+	//panic("mem_init: This function is not finished\n");
 
 	//////////////////////////////////////////////////////////////////////
 	// create initial page directory.
-	kern_pgdir = (pde_t *) boot_alloc(PGSIZE);
-	memset(kern_pgdir, 0, PGSIZE);
-
-	//////////////////////////////////////////////////////////////////////
+    kern_pgdir = (pde_t *) boot_alloc(PGSIZE);
+    memset(kern_pgdir, 0, PGSIZE);
+    init_pgdir = kern_pgdir;
+    boot_cr3 = PADDR(kern_pgdir);
+    //////////////////////////////////////////////////////////////////////
 	// Recursively insert PD in itself as a page table, to form
 	// a virtual page table at virtual address UVPT.
 	// (For now, you don't have understand the greater purpose of the
@@ -161,15 +153,15 @@ mem_init(void)
 
 	// Permissions: kernel R, user R
 	kern_pgdir[PDX(UVPT)] = PADDR(kern_pgdir) | PTE_U | PTE_P;
-
+    kern_pgdir[PDX(UVPT)] = PADDR(kern_pgdir)|PTE_U|PTE_P;
 	//////////////////////////////////////////////////////////////////////
 	// Allocate an array of npages 'struct Page's and store it in 'pages'.
 	// The kernel uses this array to keep track of physical pages: for
 	// each physical page, there is a corresponding struct Page in this
 	// array.  'npages' is the number of physical pages in memory.
 	// Your code goes here:
-
-
+    pages = boot_alloc (npages * sizeof (struct Page));
+    cprintf ("%c grnDEBUG:%c wht pages addr = %u\n", (uint32_t) pages);
 	//////////////////////////////////////////////////////////////////////
 	// Now that we've allocated the initial kernel data structures, we set
 	// up the list of free physical pages. Once we've done so, all further
@@ -271,12 +263,51 @@ page_init(void)
 	// Change the code to reflect this.
 	// NB: DO NOT actually touch the physical memory corresponding to
 	// free pages!
-	size_t i;
-	for (i = 0; i < npages; i++) {
+#if 1
+    int i;
+    int lower_ppn = PGNUM (IOPHYSMEM);
+    int upper_ppn = PGNUM (ROUNDUP (g_nextfreemem, PGSIZE));
+    cprintf("npages %d %d %d\n",npages,lower_ppn,upper_ppn);
+    for (i = 0; i < npages; i++) {
+        pages[i].pp_ref = 0;
+
+        if (i == 0) continue;
+        if (lower_ppn <= i && i < upper_ppn) continue;
+        pages[i].pp_link = page_free_list;
+        page_free_list = &pages[i];
+    }
+#endif
+#if 0
+    int i;
+	pages[0].pp_ref = 1;
+	pages[0].pp_link = page_free_list;
+    page_free_list = &pages[0];
+    //  2) Mark the rest of base memory as free.
+	for(i = 1; i < IOPHYSMEM / PGSIZE; i++) {
 		pages[i].pp_ref = 0;
 		pages[i].pp_link = page_free_list;
-		page_free_list = &pages[i];
+        page_free_list = &pages[i];
+        //LIST_INSERT_HEAD(&page_free_list, &pages[i], pp_link);
 	}
+	//  3) Then comes the IO hole [IOPHYSMEM, EXTPHYSMEM).
+	//     Mark it as in use so that it can never be allocated.      
+	for(; i < EXTPHYSMEM / PGSIZE; i++) {
+		pages[i].pp_ref = 1;
+	}	
+	//  4) Then extended memory [EXTPHYSMEM, ...).
+	//     Some of it is in use, some is free. Where is the kernel?
+	//     Which pages are used for page tables and other data structures?
+	// 从EXTPHYSMEM/SIZE到PADDR(boot_freemem)/SIZE是内核部分
+	for(; i < PADDR(g_nextfreemem) / PGSIZE; i++) {
+		pages[i].pp_ref = 1;
+	}
+	for(; i < npages; i++) {
+		pages[i].pp_ref = 0;
+        pages[i].pp_link = page_free_list;
+		page_free_list = &pages[i];
+        //LIST_INSERT_HEAD(&page_free_list, &pages[i], pp_link);
+	}
+#endif
 }
 
 //
@@ -458,7 +489,7 @@ check_page_free_list(bool only_low_memory)
 	int pdx_limit = only_low_memory ? 1 : NPDENTRIES;
 	int nfree_basemem = 0, nfree_extmem = 0;
 	char *first_free_page;
-
+    int count = 0;
 	if (!page_free_list)
 		panic("'page_free_list' is a null pointer!");
 
@@ -471,12 +502,13 @@ check_page_free_list(bool only_low_memory)
 			int pagetype = PDX(page2pa(pp)) >= pdx_limit;
 			*tp[pagetype] = pp;
 			tp[pagetype] = &pp->pp_link;
-		}
+		    count++;
+        }
 		*tp[1] = 0;
 		*tp[0] = pp2;
 		page_free_list = pp1;
 	}
-
+    cprintf("count %d\n",count);
 	// if there's a page that shouldn't be on the free list,
 	// try to make sure it eventually causes trouble.
 	for (pp = page_free_list; pp; pp = pp->pp_link)
@@ -502,9 +534,10 @@ check_page_free_list(bool only_low_memory)
 		else
 			++nfree_extmem;
 	}
-
+    cprintf("%d\n",nfree_basemem);
+    //cprintf("%d\n",nfree_extmem);
 	assert(nfree_basemem > 0);
-	assert(nfree_extmem > 0);
+	//assert(nfree_extmem > 0);
 }
 
 //
@@ -529,9 +562,9 @@ check_page_alloc(void)
 
 	// should be able to allocate three pages
 	pp0 = pp1 = pp2 = 0;
-	assert((pp0 = page_alloc(0)));
-	assert((pp1 = page_alloc(0)));
-	assert((pp2 = page_alloc(0)));
+	assert((pp0 = page_alloc(1)));
+	assert((pp1 = page_alloc(1)));
+	assert((pp2 = page_alloc(1)));
 
 	assert(pp0);
 	assert(pp1 && pp1 != pp0);
@@ -669,9 +702,9 @@ check_page(void)
 
 	// should be able to allocate three pages
 	pp0 = pp1 = pp2 = 0;
-	assert((pp0 = page_alloc(0)));
-	assert((pp1 = page_alloc(0)));
-	assert((pp2 = page_alloc(0)));
+	assert((pp0 = page_alloc(1)));
+	assert((pp1 = page_alloc(1)));
+	assert((pp2 = page_alloc(1)));
 
 	assert(pp0);
 	assert(pp1 && pp1 != pp0);
