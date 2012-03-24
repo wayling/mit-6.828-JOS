@@ -15,21 +15,8 @@ static char *g_nextfreemem;
 
 pde_t *kern_pgdir;		// Kernel's initial page directory
 pde_t *init_pgdir;
-physaddr_t boot_cr3;
 struct Page *pages;		// Physical page state array
 static struct Page *page_free_list;	// Free list of physical pages
-struct Segdesc gdt[] =
-{
-    SEG_NULL,//null
-    SEG(STA_X | STA_R, 0x0, 0xffffffff, 0),//kernel code
-    SEG(STA_W, 0x0, 0xffffffff, 0),//kernel data
-    SEG(STA_X | STA_R, 0x0, 0xffffffff, 3),//user code
-    SEG(STA_W, 0x0, 0xffffffff, 3),//user data
-    SEG_NULL//tss
-};
-struct Pseudodesc gdt_pd = {
-    sizeof(gdt) - 1, (unsigned long) gdt
-};
 
 
 // --------------------------------------------------------------
@@ -144,7 +131,6 @@ mem_init(void)
     kern_pgdir = (pde_t *) boot_alloc(PGSIZE);
     memset(kern_pgdir, 0, PGSIZE);
     init_pgdir = kern_pgdir;
-    boot_cr3 = PADDR(kern_pgdir);
     //////////////////////////////////////////////////////////////////////
 	// Recursively insert PD in itself as a page table, to form
 	// a virtual page table at virtual address UVPT.
