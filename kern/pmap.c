@@ -8,11 +8,8 @@
 #include <inc/queue.h>
 #include <kern/pmap.h>
 #include <kern/kclock.h>
-<<<<<<< HEAD
 #include <kern/env.h>
 
-=======
->>>>>>> lab2
 // These variables are set by i386_detect_memory()
 size_t npages;			// Amount of physical memory (in pages)
 static size_t npages_basemem;	// Amount of base memory (in pages)
