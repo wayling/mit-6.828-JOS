@@ -4,6 +4,7 @@
 #ifndef __ASSEMBLER__
 #include <inc/types.h>
 #include <inc/mmu.h>
+#include <inc/queue.h>
 #endif /* not __ASSEMBLER__ */
 
 /*
@@ -16,8 +17,12 @@
 #define GD_KD     0x10     // kernel data
 #define GD_UT     0x18     // user text
 #define GD_UD     0x20     // user data
+<<<<<<< HEAD
 #define GD_TSS0   0x28     // Task segment selector for CPU 0
 
+=======
+#define GD_TSS    0x28     // Task segment selector
+>>>>>>> lab2
 /*
  * Virtual memory map:                                Permissions
  *                                                    kernel/user
@@ -160,6 +165,8 @@ typedef uint32_t pde_t;
 extern volatile pte_t vpt[];     // VA of "virtual page table"
 extern volatile pde_t vpd[];     // VA of current page directory
 #endif
+
+LIST_HEAD(Page_list, Page);
 
 /*
  * Page descriptor structures, mapped at UPAGES.
