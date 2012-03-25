@@ -153,7 +153,8 @@ mem_init(void)
 	//////////////////////////////////////////////////////////////////////
 	// Make 'envs' point to an array of size 'NENV' of 'struct Env'.
 	// LAB 3: Your code here.
-
+    envs = (struct Env*) boot_alloc(sizeof( struct Env) * NENV);
+    cprintf("envs %x\n", (uint32_t)envs);
 	//////////////////////////////////////////////////////////////////////
 	// Now that we've allocated the initial kernel data structures, we set
 	// up the list of free physical pages. Once we've done so, all further
@@ -212,20 +213,26 @@ mem_init(void)
         ROUNDUP (npages * sizeof (struct Page), PGSIZE),
         PADDR (pages), // PADDR returns a (void*)
         PTE_U);
-#if 1
     boot_map_region(
             kern_pgdir,
             KSTACKTOP - KSTKSIZE,
             KSTKSIZE, // 8 * PGSIZE
             PADDR (bootstack),
             PTE_W);
-#endif
     boot_map_region(
             kern_pgdir,
             KERNBASE,
             ~KERNBASE + 1, // 2^32 - KERNBASE = (2 ^ 32 - 1 - KERNBASE) + 1 = ~KERNBASE + 1
             (physaddr_t) 0,
             PTE_W);
+    //kern_pgdir[PDX(UENVS)] = PADDR(envs) | PTE_U | PTE_P;
+    boot_map_region(
+            kern_pgdir,
+            UENVS,
+            ROUNDUP((sizeof(struct Env) * NENV), PGSIZE),
+            PADDR(envs),
+            (PTE_U | PTE_P));
+
 
     // Check that the initial page directory has been set up correctly.
 	check_kern_pgdir();
